@@ -1,98 +1,162 @@
-# WeChat Private Knowledge Base RAG Assistant
+# WeChat Assistant Nanobot
 
-A WeChat-oriented private knowledge base assistant built on top of [HKUDS/nanobot](https://github.com/HKUDS/nanobot).
+A WeChat-based private knowledge base RAG assistant. Users can send PDF, Word, Markdown, TXT, and other documents in WeChat. The bot stores the files in a local workspace, parses them, splits them into chunks, and builds a SQLite retrieval index. After that, users can ask questions about the uploaded documents directly in WeChat.
 
-This project keeps nanobot's lightweight agent architecture, channel system, provider abstraction, and tool-calling loop, then adds a local document ingestion and retrieval layer for private-data question answering.
+This project is based on [HKUDS/nanobot](https://github.com/HKUDS/nanobot). nanobot provides the agent loop, model provider abstraction, tool-calling runtime, and WeChat channel. This project adds automatic WeChat file ingestion, a local knowledge base, and a `knowledge_search` retrieval tool.
 
-## Method
+## Features
 
-```text
-WeChat file intake
--> MinerU-first document parsing
--> local chunk storage
--> SQLite retrieval index
--> knowledge_search agent tool
--> retrieval-augmented answers with source metadata
-```
+- Automatically downloads WeChat file messages and sends them through the knowledge ingestion pipeline.
+- Supports `pdf`, `docx`, `txt`, and `md`.
+- Uses MinerU first for PDF parsing, with OCR enabled by default.
+- Stores ingested data in the local workspace, without requiring a cloud vector database.
+- Uses SQLite as a lightweight retrieval index, making deployment and debugging simple.
+- Lets the agent call `knowledge_search` before answering questions about uploaded documents.
+- Keeps nanobot's original provider configuration style, so it can work with DeepSeek, OpenAI, DashScope, and other OpenAI-compatible APIs.
 
-The goal is not to build another generic chatbot. The goal is to let a user send documents through WeChat and later ask questions grounded in those uploaded files.
-
-## What Changed From nanobot
-
-This fork adds a private knowledge base pipeline around nanobot:
-
-- WeChat file messages are saved locally and marked as ingestion candidates.
-- Uploaded documents are parsed, normalized, chunked, and indexed.
-- PDF parsing prefers MinerU and keeps a basic fallback path.
-- Local storage is organized under `knowledge/raw`, `knowledge/parsed`, `knowledge/chunks`, and `knowledge/index`.
-- A new `knowledge_search` tool lets the agent retrieve evidence before answering.
-- The agent loop can automatically ingest newly uploaded files before processing the current turn.
-- Knowledge-base behavior is configurable from the normal nanobot config file.
-
-## Architecture
+## Workflow
 
 ```text
 User sends a file in WeChat
-        |
-        v
-WeChat channel downloads the file
-        |
-        v
-Agent receives media paths and ingest metadata
-        |
-        v
-KnowledgeService parses and chunks the document
-        |
-        v
-KnowledgeStore writes raw files, parsed JSON, chunks, and SQLite index
-        |
-        v
-User asks a question
-        |
-        v
-Agent calls knowledge_search
-        |
-        v
-Model answers with retrieved evidence and source metadata
+  -> WeChat channel downloads the file
+  -> AgentLoop detects ingestible files
+  -> KnowledgeService parses the document
+  -> KnowledgeChunker splits text into chunks
+  -> KnowledgeStore saves raw files, parsed results, chunks, and SQLite index
+  -> User asks a question
+  -> Agent calls knowledge_search
+  -> Model answers based on retrieved snippets
 ```
 
-## Main Modules
+## Project Structure
 
 ```text
 nanobot/knowledge/
-  types.py          normalized document, section, chunk, and search result types
-  parser.py         document parsing entrypoint
-  mineru_parser.py  MinerU-backed PDF parsing wrapper
-  chunker.py        chunking logic
-  store.py          raw/parsed/chunk persistence and SQLite retrieval
-  service.py        ingestion and search orchestration
+  types.py          Knowledge base data structures
+  parser.py         Document parsing entry point
+  mineru_parser.py  MinerU PDF parser wrapper
+  chunker.py        Text chunking
+  store.py          Local files and SQLite index
+  service.py        Ingestion and retrieval orchestration
 
 nanobot/agent/tools/knowledge_search.py
-  Agent tool for querying the local knowledge base.
+  Local knowledge search tool used by the agent
 
 nanobot/channels/weixin.py
-  Marks downloaded WeChat files as knowledge ingestion candidates.
+  Downloads WeChat files and marks them as ingestible
 
 nanobot/agent/loop.py
-  Runs automatic ingestion before building the current agent turn.
+  Runs automatic file ingestion before handling user messages
 ```
 
-## Supported Documents
+## Requirements
 
-Current MVP support:
+- Python 3.11 or 3.12.
+- A usable LLM API key.
+- A MinerU API token is recommended for scanned PDFs.
+- If the bot needs to run as a long-running WeChat assistant, the host machine should not sleep. For stable use, deploy it on a server.
 
-- `txt`
-- `md`
-- `docx`
-- `pdf`
+## Installation
 
-PDF parsing uses MinerU first. If MinerU is unavailable or fails, the parser falls back to a basic text path when possible.
+Install from source:
 
-## Knowledge Configuration
+```bash
+git clone https://github.com/zhaoxinyu2002/wechat-assistant-nanobot.git
+cd wechat-assistant-nanobot
+pip install -e ".[weixin]"
+```
 
-The project adds a top-level `knowledge` section to the normal nanobot config.
+If you use conda, create or activate an environment first:
 
-Example:
+```bash
+conda create -n nanobot python=3.11
+conda activate nanobot
+pip install -e ".[weixin]"
+```
+
+If you also want to run tests:
+
+```bash
+pip install -e ".[weixin,dev]"
+```
+
+## Initialize Configuration
+
+Generate the default configuration:
+
+```bash
+nanobot onboard
+```
+
+Default config path:
+
+```text
+~/.nanobot/config.json
+```
+
+On Windows, it is usually:
+
+```text
+C:\Users\<your-username>\.nanobot\config.json
+```
+
+## Configure the Model
+
+This project follows nanobot's provider configuration style. The example below uses the official DeepSeek API. Replace the placeholder with your own key.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/workspace",
+      "model": "deepseek-reasoner",
+      "provider": "deepseek",
+      "maxTokens": 2048,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1,
+      "maxToolIterations": 40,
+      "timezone": "Asia/Shanghai"
+    }
+  },
+  "providers": {
+    "deepseek": {
+      "apiKey": "YOUR_DEEPSEEK_API_KEY",
+      "apiBase": "https://api.deepseek.com"
+    }
+  }
+}
+```
+
+For other OpenAI-compatible services, change the provider, model name, and `apiBase` as needed. Do not commit real API keys to GitHub.
+
+## Configure the WeChat Channel
+
+Enable the WeChat channel in `config.json`:
+
+```json
+{
+  "channels": {
+    "weixin": {
+      "enabled": true,
+      "allowFrom": ["*"]
+    }
+  }
+}
+```
+
+For real use, replace `allowFrom` with your own WeChat user ID. `["*"]` allows all senders and is convenient for debugging, but it is not recommended for public or shared deployments.
+
+Log in to the WeChat channel for the first time:
+
+```bash
+nanobot channels login weixin
+```
+
+Scan the QR code shown in the terminal. The login state is saved locally, so repeated QR login is usually not required.
+
+## Configure the Knowledge Base
+
+Add or update the `knowledge` section in `config.json`:
 
 ```json
 {
@@ -107,41 +171,96 @@ Example:
     "chunkOverlap": 150,
     "parserPdf": "mineru",
     "mineruMode": "precision",
-    "mineruApiToken": "",
-    "mineruIsOcr": true
+    "mineruBaseUrl": "https://mineru.net",
+    "mineruApiToken": "YOUR_MINERU_TOKEN",
+    "mineruIsOcr": true,
+    "mineruTimeoutS": 300,
+    "mineruPollIntervalS": 3
   }
 }
 ```
 
-Model and provider configuration follow the upstream nanobot configuration style. See the original nanobot provider documentation for API key and model setup.
+Configuration notes:
+
+- `enabled`: Enables or disables the knowledge base.
+- `autoIngestFromMedia`: Automatically ingests files received from WeChat.
+- `rawDir`: Stores original uploaded files.
+- `parsedDir`: Stores parsed JSON results.
+- `chunksDir`: Stores chunked JSONL files.
+- `indexDir`: Stores the SQLite retrieval index.
+- `parserPdf`: PDF parser. The default is `mineru`.
+- `mineruMode`: `precision` uses the MinerU API; `command` uses a local command; `agent` uses the MinerU agent API.
+- `mineruIsOcr`: Enables OCR. Keep this as `true` for better scanned-PDF support.
+
+## Start the Bot
+
+Start the gateway:
+
+```bash
+nanobot gateway
+```
+
+Common Windows + conda startup:
+
+```powershell
+conda activate nanobot
+nanobot gateway
+```
+
+To keep it running in a separate PowerShell window, adjust the project path and run:
+
+```powershell
+Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd <project-path>; conda activate nanobot; nanobot gateway'
+```
+
+The bot only replies while the gateway process is running. Closing the terminal, exiting the conda environment, putting the computer to sleep, or losing network access will stop the bot from responding.
 
 ## Usage
 
-1. Configure nanobot as usual.
-2. Enable the WeChat channel.
-3. Configure the `knowledge` section if PDF/MinerU parsing is needed.
-4. Start the nanobot gateway.
-5. Send a supported document through WeChat.
-6. Ask questions about the uploaded document.
+1. Start `nanobot gateway`.
+2. Send a PDF, docx, txt, or md file to the bot in WeChat.
+3. Wait for ingestion to finish. The ingestion result is added to the current session context.
+4. Ask questions about the uploaded file.
 
-For long-running usage, keep the gateway process alive. If the host machine sleeps, the bot will stop receiving and answering messages.
+## Local Data
 
-## Notes
+Default workspace:
 
-This is an MVP implementation focused on a local single-user knowledge base. It intentionally uses local files and SQLite instead of a full vector database to keep deployment simple and easy to inspect.
+```text
+~/.nanobot/workspace
+```
 
-Possible next steps:
+Knowledge base data is stored under the workspace:
 
-- Add vector or hybrid retrieval.
-- Improve source citation formatting.
-- Add multi-user knowledge isolation.
-- Add explicit knowledge management commands.
-- Improve OCR status reporting and ingestion failure feedback.
+```text
+knowledge/raw       Original uploaded files
+knowledge/parsed    Parsed results
+knowledge/chunks    Chunked text snippets
+knowledge/index     SQLite retrieval index
+```
 
-## Credits
+To back up the knowledge base, back up the whole workspace.
 
-This project is based on [HKUDS/nanobot](https://github.com/HKUDS/nanobot). nanobot provides the lightweight agent runtime, provider abstraction, channel integrations, and tool-calling framework. This fork adds the WeChat private knowledge base RAG pipeline.
+## Tests
+
+This repository keeps the tests related to the knowledge-base extension:
+
+```text
+tests/knowledge/test_ingest_service.py
+tests/tools/test_knowledge_search_tool.py
+tests/agent/test_loop_knowledge_ingest.py
+```
+
+Run:
+
+```bash
+pytest tests/knowledge tests/tools/test_knowledge_search_tool.py tests/agent/test_loop_knowledge_ingest.py
+```
+
+## Open Source Notice
+
+This project is not a chatbot framework written from scratch. It extends nanobot with a WeChat private knowledge base RAG pipeline. The original MIT License is preserved, and the upstream project is credited in this README.
 
 ## License
 
-This project follows the original MIT License. See [LICENSE](LICENSE).
+MIT License. See [LICENSE](LICENSE).
