@@ -16,6 +16,7 @@ build/
 *.pyzz
 .venv/
 venv/
+node_modules/
 __pycache__/
 poetry.lock
 .pytest_cache/
