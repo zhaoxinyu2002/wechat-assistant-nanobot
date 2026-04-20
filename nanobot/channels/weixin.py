@@ -90,7 +90,9 @@ class WeixinConfig(Base):
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
-    local_file_fallback_dirs: list[str] = Field(default_factory=lambda: ["~/Desktop", "~/Downloads"])
+    # Optional, explicit directories for deployments that want local filename
+    # fallback when WeChat omits download metadata. Disabled by default.
+    local_file_fallback_dirs: list[str] = Field(default_factory=list)
 
 
 class WeixinChannel(BaseChannel):
@@ -734,7 +736,7 @@ class WeixinChannel(BaseChannel):
             return None
 
     def _resolve_local_file_fallback(self, filename: str | None) -> str | None:
-        """Find an exact local filename match when WeChat omits download metadata."""
+        """Find an exact local filename match in explicitly configured directories."""
         if not filename:
             return None
         safe_name = os.path.basename(filename)
