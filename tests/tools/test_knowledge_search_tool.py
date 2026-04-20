@@ -15,4 +15,5 @@ def test_knowledge_search_tool_returns_source_aware_results(tmp_path) -> None:
     result = asyncio.run(tool.execute(query="knowledge base", top_k=2))
 
     assert "source=guide.txt" in result
+    assert "score=" in result
     assert "knowledge base" in result

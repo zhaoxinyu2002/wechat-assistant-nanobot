@@ -1,6 +1,6 @@
 # WeChat Assistant Nanobot
 
-A WeChat-based private knowledge base RAG assistant. Users can send PDF, Word, Markdown, TXT, and other documents in WeChat. The bot stores the files in a local workspace, parses them, splits them into chunks, and builds a SQLite retrieval index. After that, users can ask questions about the uploaded documents directly in WeChat.
+A WeChat-based private knowledge base RAG assistant. Users can send PDF, Word, Markdown, TXT, and other documents in WeChat. The bot stores the files in a local workspace, parses them, splits them into chunks, persists SQLite chunk metadata and embeddings, and can build a local FAISS vector index. After that, users can ask questions about the uploaded documents directly in WeChat.
 
 This project is based on [HKUDS/nanobot](https://github.com/HKUDS/nanobot). nanobot provides the agent loop, model provider abstraction, tool-calling runtime, and WeChat channel. This project adds automatic WeChat file ingestion, a local knowledge base, and a `knowledge_search` retrieval tool.
 
@@ -169,6 +169,12 @@ Add or update the `knowledge` section in `config.json`:
     "indexDir": "knowledge/index",
     "maxChunkChars": 1200,
     "chunkOverlap": 150,
+    "embeddingProvider": "hashing",
+    "embeddingDim": 384,
+    "vectorIndex": "faiss",
+    "retrievalMode": "hybrid",
+    "keywordWeight": 0.35,
+    "vectorWeight": 0.65,
     "parserPdf": "mineru",
     "mineruMode": "precision",
     "mineruBaseUrl": "https://mineru.net",
@@ -187,10 +193,20 @@ Configuration notes:
 - `rawDir`: Stores original uploaded files.
 - `parsedDir`: Stores parsed JSON results.
 - `chunksDir`: Stores chunked JSONL files.
-- `indexDir`: Stores the SQLite retrieval index.
+- `indexDir`: Stores the SQLite chunk/embedding index and optional FAISS vector index.
+- `embeddingProvider`: Embedding backend. The built-in default is `hashing`, which is local and dependency-free.
+- `vectorIndex`: Vector index backend. `faiss` is used when `faiss-cpu` is installed; otherwise vector search falls back to SQLite-stored embeddings.
+- `retrievalMode`: Default retrieval mode for `knowledge_search`: `hybrid`, `vector`, or `keyword`.
+- `keywordWeight` / `vectorWeight`: Score weights used by hybrid retrieval.
 - `parserPdf`: PDF parser. The default is `mineru`.
 - `mineruMode`: `precision` uses the MinerU API; `command` uses a local command; `agent` uses the MinerU agent API.
 - `mineruIsOcr`: Enables OCR. Keep this as `true` for better scanned-PDF support.
+
+Optional FAISS acceleration can be installed with:
+
+```bash
+pip install ".[rag]"
+```
 
 ## Start the Bot
 
@@ -236,7 +252,7 @@ Knowledge base data is stored under the workspace:
 knowledge/raw       Original uploaded files
 knowledge/parsed    Parsed results
 knowledge/chunks    Chunked text snippets
-knowledge/index     SQLite retrieval index
+knowledge/index     SQLite chunk/embedding index and optional FAISS files
 ```
 
 To back up the knowledge base, back up the whole workspace.

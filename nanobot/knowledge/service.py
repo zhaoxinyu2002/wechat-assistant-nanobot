@@ -5,9 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanobot.knowledge.chunker import KnowledgeChunker
+from nanobot.knowledge.embeddings import HashingEmbedder
 from nanobot.knowledge.parser import DocumentParser
 from nanobot.knowledge.store import KnowledgeStore
-from nanobot.knowledge.types import IngestResult, SearchHit, KnowledgeChunk
+from nanobot.knowledge.types import IngestResult, KnowledgeChunk, SearchHit
 
 
 class KnowledgeService:
@@ -27,6 +28,12 @@ class KnowledgeService:
         index_dir: str = "knowledge/index",
         max_chunk_chars: int = 1200,
         chunk_overlap: int = 150,
+        embedding_provider: str = "hashing",
+        embedding_dim: int = 384,
+        vector_index: str = "faiss",
+        retrieval_mode: str = "hybrid",
+        keyword_weight: float = 0.35,
+        vector_weight: float = 0.65,
         parser_pdf: str = "mineru",
         mineru_command: str = "",
         mineru_mode: str = "agent",
@@ -50,6 +57,16 @@ class KnowledgeService:
             parsed_dir=parsed_dir,
             chunks_dir=chunks_dir,
             index_dir=index_dir,
+            embedding_dim=embedding_dim,
+            vector_index=vector_index,
+        )
+        self.embedding_provider = embedding_provider
+        self.retrieval_mode = retrieval_mode
+        self.keyword_weight = keyword_weight
+        self.vector_weight = vector_weight
+        self.embedder = self._build_embedder(
+            provider=embedding_provider,
+            dimension=embedding_dim,
         )
         self.parser = DocumentParser(
             pdf_parser=parser_pdf,
@@ -99,8 +116,9 @@ class KnowledgeService:
             chunks = self.chunker.chunk_document(parsed)
             if not chunks:
                 raise ValueError("no chunks generated from parsed document")
+            embeddings = self.embed_chunks(chunks)
             self.store.save_parsed_document(parsed)
-            self.store.save_chunks(parsed.source_file, chunks)
+            self.store.save_chunks(parsed.source_file, chunks, embeddings=embeddings)
             return IngestResult(
                 path=str(path),
                 status="ok",
@@ -114,10 +132,44 @@ class KnowledgeService:
                 error=str(exc),
             )
 
-    def search(self, query: str, top_k: int = 5, source_filter: str | None = None) -> list[SearchHit]:
-        rows = self.store.search(query=query, top_k=top_k, source_filter=source_filter)
+    def embed_chunks(self, chunks: list[KnowledgeChunk]) -> list[list[float]]:
+        return self.embedder.embed_texts([chunk.text for chunk in chunks])
+
+    def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        source_filter: str | None = None,
+        retrieval_mode: str | None = None,
+        min_score: float = 0.0,
+    ) -> list[SearchHit]:
+        if not query.strip():
+            return []
+
+        mode = (retrieval_mode or self.retrieval_mode).lower()
+        if mode == "keyword":
+            rows = self.store.keyword_search(query=query, top_k=top_k, source_filter=source_filter)
+        elif mode == "vector":
+            rows = self.store.vector_search(
+                query_embedding=self.embedder.embed_text(query),
+                top_k=top_k,
+                source_filter=source_filter,
+            )
+        else:
+            rows = self.store.hybrid_search(
+                query=query,
+                query_embedding=self.embedder.embed_text(query),
+                top_k=top_k,
+                source_filter=source_filter,
+                keyword_weight=self.keyword_weight,
+                vector_weight=self.vector_weight,
+            )
+
         hits: list[SearchHit] = []
         for row in rows:
+            score = float(row.get("score") or row.get("vector_score") or row.get("keyword_score") or 0.0)
+            if score < min_score:
+                continue
             hits.append(SearchHit(
                 chunk=KnowledgeChunk(
                     chunk_id=row["chunk_id"],
@@ -127,6 +179,12 @@ class KnowledgeService:
                     heading=row["heading"],
                     text=row["text"],
                 ),
-                score=1.0,
+                score=score,
             ))
         return hits
+
+    @staticmethod
+    def _build_embedder(provider: str, dimension: int) -> HashingEmbedder:
+        if provider.lower() != "hashing":
+            raise ValueError(f"unsupported embedding provider: {provider}")
+        return HashingEmbedder(dimension=dimension)

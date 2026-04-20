@@ -41,6 +41,16 @@ class KnowledgeSearchTool(Tool):
                     "type": ["string", "null"],
                     "description": "Optional file name filter",
                 },
+                "retrieval_mode": {
+                    "type": "string",
+                    "enum": ["hybrid", "vector", "keyword"],
+                    "description": "Retrieval backend to use. Defaults to hybrid.",
+                },
+                "min_score": {
+                    "type": "number",
+                    "description": "Drop evidence below this retrieval score",
+                    "minimum": 0,
+                },
             },
             "required": ["query"],
         }
@@ -50,11 +60,19 @@ class KnowledgeSearchTool(Tool):
         query: str | None = None,
         top_k: int = 5,
         source_filter: str | None = None,
+        retrieval_mode: str | None = None,
+        min_score: float = 0.0,
         **_: Any,
     ) -> str:
         if not query:
             return "Error: query is required"
-        hits = self.service.search(query=query, top_k=top_k, source_filter=source_filter)
+        hits = self.service.search(
+            query=query,
+            top_k=top_k,
+            source_filter=source_filter,
+            retrieval_mode=retrieval_mode,
+            min_score=min_score,
+        )
         if not hits:
             return "No relevant knowledge found."
 
@@ -66,6 +84,7 @@ class KnowledgeSearchTool(Tool):
                 meta.append(f"page={chunk.page}")
             if chunk.heading:
                 meta.append(f"heading={chunk.heading}")
+            meta.append(f"score={hit.score:.3f}")
             lines.append(f"[{index}] {' '.join(meta)}")
             lines.append(chunk.text)
             lines.append("")

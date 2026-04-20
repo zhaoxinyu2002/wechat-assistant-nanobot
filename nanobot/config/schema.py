@@ -161,6 +161,12 @@ class KnowledgeConfig(Base):
     index_dir: str = "knowledge/index"
     max_chunk_chars: int = 1200
     chunk_overlap: int = 150
+    embedding_provider: str = "hashing"
+    embedding_dim: int = Field(default=384, ge=16, le=4096)
+    vector_index: str = "faiss"
+    retrieval_mode: str = "hybrid"  # hybrid | vector | keyword
+    keyword_weight: float = Field(default=0.35, ge=0.0, le=1.0)
+    vector_weight: float = Field(default=0.65, ge=0.0, le=1.0)
     parser_pdf: str = "mineru"
     mineru_command: str = ""
     mineru_mode: str = "agent"  # agent | precision | command

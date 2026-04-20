@@ -1,5 +1,7 @@
-from nanobot.knowledge.service import KnowledgeService
+import sqlite3
 from zipfile import ZipFile
+
+from nanobot.knowledge.service import KnowledgeService
 
 
 def test_ingest_service_saves_chunks_and_supports_search(tmp_path) -> None:
@@ -20,6 +22,28 @@ def test_ingest_service_saves_chunks_and_supports_search(tmp_path) -> None:
     assert hits
     assert hits[0].chunk.source_file == "notes.md"
     assert "self-attention" in hits[0].chunk.text
+
+
+def test_ingest_service_persists_embeddings_and_supports_vector_search(tmp_path) -> None:
+    source = tmp_path / "rag.txt"
+    source.write_text(
+        "Hybrid retrieval combines keyword matching with vector similarity.",
+        encoding="utf-8",
+    )
+
+    service = KnowledgeService(tmp_path)
+    results = service.ingest_files([str(source)])
+
+    assert results[0].status == "ok"
+    with sqlite3.connect(tmp_path / "knowledge" / "index" / "knowledge.db") as conn:
+        count = conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+    assert count >= 1
+
+    hits = service.search("vector similarity", top_k=1, retrieval_mode="vector")
+
+    assert hits
+    assert hits[0].score >= 0
+    assert hits[0].chunk.source_file == "rag.txt"
 
 
 def test_ingest_service_saves_raw_file_and_parses_docx(tmp_path) -> None:

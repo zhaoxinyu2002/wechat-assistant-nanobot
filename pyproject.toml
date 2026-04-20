@@ -67,6 +67,9 @@ matrix = [
 langsmith = [
     "langsmith>=0.1.0",
 ]
+rag = [
+    "faiss-cpu>=1.8.0,<2.0.0",
+]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
