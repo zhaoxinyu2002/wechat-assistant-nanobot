@@ -178,8 +178,8 @@ class KnowledgeConfig(Base):
     mineru_enable_formula: bool = True
     mineru_is_ocr: bool = True
     mineru_page_range: str | None = None
-    mineru_timeout_s: int = 300
-    mineru_poll_interval_s: int = 3
+    mineru_timeout_s: int = 3600
+    mineru_poll_interval_s: int = 10
 
 
 class Config(BaseSettings):

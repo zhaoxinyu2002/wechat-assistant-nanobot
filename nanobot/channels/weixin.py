@@ -90,6 +90,7 @@ class WeixinConfig(Base):
     token: str = ""  # Manually set token, or obtained via QR login
     state_dir: str = ""  # Default: ~/.nanobot/weixin/
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
+    local_file_fallback_dirs: list[str] = Field(default_factory=lambda: ["~/Desktop", "~/Downloads"])
 
 
 class WeixinChannel(BaseChannel):
@@ -611,7 +612,20 @@ class WeixinChannel(BaseChannel):
                     media_paths.append(file_path)
                     ingest_candidates.append(file_path)
                 else:
-                    content_parts.append(f"[file: {file_name}]")
+                    fallback_path = self._resolve_local_file_fallback(file_name)
+                    if fallback_path:
+                        content_parts.append(
+                            f"[file: {file_name}]\n[File: source: {fallback_path}]"
+                        )
+                        media_paths.append(fallback_path)
+                        ingest_candidates.append(fallback_path)
+                        logger.warning(
+                            "WeChat file {} had no downloadable media; using local fallback {}",
+                            file_name,
+                            fallback_path,
+                        )
+                    else:
+                        content_parts.append(f"[file: {file_name}: download failed]")
 
             elif item_type == ITEM_VIDEO:
                 video_item = item.get("video_item") or {}
@@ -661,6 +675,13 @@ class WeixinChannel(BaseChannel):
             encrypt_query_param = media.get("encrypt_query_param", "")
 
             if not encrypt_query_param:
+                logger.warning(
+                    "WeChat {} download skipped: missing encrypt_query_param "
+                    "(item_keys={}, media_keys={})",
+                    media_type,
+                    sorted(typed_item.keys()),
+                    sorted(media.keys()),
+                )
                 return None
 
             # Resolve AES key (media-download.ts:43-45, pic-decrypt.ts:40-52)
@@ -711,6 +732,27 @@ class WeixinChannel(BaseChannel):
         except Exception as e:
             logger.error("Error downloading WeChat media: {}", e)
             return None
+
+    def _resolve_local_file_fallback(self, filename: str | None) -> str | None:
+        """Find an exact local filename match when WeChat omits download metadata."""
+        if not filename:
+            return None
+        safe_name = os.path.basename(filename)
+        if not safe_name or safe_name in {".", ".."}:
+            return None
+
+        matches: list[Path] = []
+        for raw_dir in self.config.local_file_fallback_dirs:
+            root = Path(raw_dir).expanduser()
+            candidate = root / safe_name
+            if candidate.is_file():
+                matches.append(candidate)
+
+        if not matches:
+            return None
+
+        newest = max(matches, key=lambda path: path.stat().st_mtime)
+        return str(newest)
 
     # ------------------------------------------------------------------
     # Outbound  (matches send.ts buildTextMessageReq + sendMessageWeixin)

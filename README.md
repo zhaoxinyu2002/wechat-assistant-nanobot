@@ -180,8 +180,8 @@ Add or update the `knowledge` section in `config.json`:
     "mineruBaseUrl": "https://mineru.net",
     "mineruApiToken": "YOUR_MINERU_TOKEN",
     "mineruIsOcr": true,
-    "mineruTimeoutS": 300,
-    "mineruPollIntervalS": 3
+    "mineruTimeoutS": 3600,
+    "mineruPollIntervalS": 10
   }
 }
 ```
