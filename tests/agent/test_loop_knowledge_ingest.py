@@ -46,3 +46,26 @@ def test_process_message_prepends_ingest_result_to_current_turn(tmp_path) -> Non
         current_text = current_user
     assert "Knowledge Ingestion Result" in current_text
     assert "notes.txt" in current_text
+
+
+def test_media_download_failure_note_marks_file_not_ingested() -> None:
+    from nanobot.agent.loop import AgentLoop
+
+    msg = InboundMessage(
+        channel="weixin",
+        sender_id="user",
+        chat_id="chat",
+        content="[file: Happy-LLM-0727.pdf: download failed; not ingested]",
+        metadata={
+            "download_failures": [{
+                "name": "Happy-LLM-0727.pdf",
+                "reason": "WeChat media download failed before knowledge ingestion",
+            }],
+        },
+    )
+
+    note = AgentLoop._media_download_failure_note(msg)
+
+    assert note is not None
+    assert "Happy-LLM-0727.pdf" in note
+    assert "was not saved or parsed" in note

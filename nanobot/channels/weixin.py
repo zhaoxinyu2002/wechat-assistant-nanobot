@@ -65,6 +65,8 @@ MAX_CONSECUTIVE_FAILURES = 3
 BACKOFF_DELAY_S = 30
 RETRY_DELAY_S = 2
 MAX_QR_REFRESH_COUNT = 3
+MEDIA_DOWNLOAD_MAX_ATTEMPTS = 3
+MEDIA_DOWNLOAD_RETRY_DELAY_S = 2
 
 # Default long-poll timeout; overridden by server via longpolling_timeout_ms.
 DEFAULT_LONG_POLL_TIMEOUT_S = 35
@@ -540,6 +542,7 @@ class WeixinChannel(BaseChannel):
         content_parts: list[str] = []
         media_paths: list[str] = []
         ingest_candidates: list[str] = []
+        download_failures: list[dict[str, str]] = []
 
         for item in item_list:
             item_type = item.get("type", 0)
@@ -627,7 +630,14 @@ class WeixinChannel(BaseChannel):
                             fallback_path,
                         )
                     else:
-                        content_parts.append(f"[file: {file_name}: download failed]")
+                        content_parts.append(
+                            f"[file: {file_name}: download failed; not ingested]"
+                        )
+                        download_failures.append({
+                            "name": str(file_name),
+                            "media_type": "file",
+                            "reason": "WeChat media download failed before knowledge ingestion",
+                        })
 
             elif item_type == ITEM_VIDEO:
                 video_item = item.get("video_item") or {}
@@ -658,6 +668,7 @@ class WeixinChannel(BaseChannel):
                 "message_id": msg_id,
                 "ingest_candidates": ingest_candidates,
                 "ingest_source": "weixin",
+                "download_failures": download_failures,
             },
         )
 
@@ -707,9 +718,41 @@ class WeixinChannel(BaseChannel):
             )
 
             assert self._client is not None
-            resp = await self._client.get(cdn_url)
-            resp.raise_for_status()
-            data = resp.content
+            data: bytes | None = None
+            for attempt in range(1, MEDIA_DOWNLOAD_MAX_ATTEMPTS + 1):
+                try:
+                    resp = await self._client.get(cdn_url)
+                    resp.raise_for_status()
+                    data = resp.content
+                    break
+                except httpx.HTTPStatusError as e:
+                    logger.error(
+                        "WeChat {} download failed with HTTP status {} for {}",
+                        media_type,
+                        e.response.status_code,
+                        filename or "<generated>",
+                    )
+                    return None
+                except httpx.TransportError as e:
+                    if attempt < MEDIA_DOWNLOAD_MAX_ATTEMPTS:
+                        logger.warning(
+                            "WeChat {} download attempt {}/{} failed for {}: {}; "
+                            "retrying in {}s",
+                            media_type,
+                            attempt,
+                            MEDIA_DOWNLOAD_MAX_ATTEMPTS,
+                            filename or "<generated>",
+                            e,
+                            MEDIA_DOWNLOAD_RETRY_DELAY_S,
+                        )
+                        await asyncio.sleep(MEDIA_DOWNLOAD_RETRY_DELAY_S)
+                        continue
+                    logger.error(
+                        "Error downloading WeChat media after {} attempts: {}",
+                        MEDIA_DOWNLOAD_MAX_ATTEMPTS,
+                        e,
+                    )
+                    return None
 
             if aes_key_b64 and data:
                 data = _decrypt_aes_ecb(data, aes_key_b64)

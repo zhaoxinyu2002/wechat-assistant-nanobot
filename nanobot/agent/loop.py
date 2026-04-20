@@ -441,6 +441,27 @@ class AgentLoop:
                 lines.append(f"- {name}: ingest failed: {result.error}")
         return "\n".join(lines)
 
+    @staticmethod
+    def _media_download_failure_note(msg: InboundMessage) -> str | None:
+        """Summarize media download failures before the agent sees stale files."""
+        failures = msg.metadata.get("download_failures") or []
+        if not failures:
+            return None
+
+        lines = ["[Media Download Result]"]
+        for failure in failures:
+            if isinstance(failure, dict):
+                name = str(failure.get("name") or "unknown")
+                reason = str(failure.get("reason") or "download failed")
+            else:
+                name = "unknown"
+                reason = str(failure)
+            lines.append(
+                f"- {name}: download failed before knowledge ingestion ({reason}). "
+                "The file from this message was not saved or parsed."
+            )
+        return "\n".join(lines)
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -502,9 +523,11 @@ class AgentLoop:
 
         history = session.get_history(max_messages=0)
         ingest_note = await self._maybe_ingest_knowledge_files(msg)
+        download_failure_note = self._media_download_failure_note(msg)
         current_message = msg.content
-        if ingest_note:
-            current_message = f"{ingest_note}\n\n{current_message}"
+        notes = [note for note in (download_failure_note, ingest_note) if note]
+        if notes:
+            current_message = "\n\n".join([*notes, current_message])
         initial_messages = self.context.build_messages(
             history=history,
             current_message=current_message,
