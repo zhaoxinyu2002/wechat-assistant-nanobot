@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import json
 import mimetypes
@@ -65,8 +66,8 @@ MAX_CONSECUTIVE_FAILURES = 3
 BACKOFF_DELAY_S = 30
 RETRY_DELAY_S = 2
 MAX_QR_REFRESH_COUNT = 3
-MEDIA_DOWNLOAD_MAX_ATTEMPTS = 3
-MEDIA_DOWNLOAD_RETRY_DELAY_S = 2
+MEDIA_DOWNLOAD_MAX_ATTEMPTS = 5
+MEDIA_DOWNLOAD_RETRY_DELAY_S = 5
 
 # Default long-poll timeout; overridden by server via longpolling_timeout_ms.
 DEFAULT_LONG_POLL_TIMEOUT_S = 35
@@ -718,50 +719,6 @@ class WeixinChannel(BaseChannel):
             )
 
             assert self._client is not None
-            data: bytes | None = None
-            for attempt in range(1, MEDIA_DOWNLOAD_MAX_ATTEMPTS + 1):
-                try:
-                    resp = await self._client.get(cdn_url)
-                    resp.raise_for_status()
-                    data = resp.content
-                    break
-                except httpx.HTTPStatusError as e:
-                    logger.error(
-                        "WeChat {} download failed with HTTP status {} for {}",
-                        media_type,
-                        e.response.status_code,
-                        filename or "<generated>",
-                    )
-                    return None
-                except httpx.TransportError as e:
-                    if attempt < MEDIA_DOWNLOAD_MAX_ATTEMPTS:
-                        logger.warning(
-                            "WeChat {} download attempt {}/{} failed for {}: {}; "
-                            "retrying in {}s",
-                            media_type,
-                            attempt,
-                            MEDIA_DOWNLOAD_MAX_ATTEMPTS,
-                            filename or "<generated>",
-                            e,
-                            MEDIA_DOWNLOAD_RETRY_DELAY_S,
-                        )
-                        await asyncio.sleep(MEDIA_DOWNLOAD_RETRY_DELAY_S)
-                        continue
-                    logger.error(
-                        "Error downloading WeChat media after {} attempts: {}",
-                        MEDIA_DOWNLOAD_MAX_ATTEMPTS,
-                        e,
-                    )
-                    return None
-
-            if aes_key_b64 and data:
-                data = _decrypt_aes_ecb(data, aes_key_b64)
-            elif not aes_key_b64:
-                logger.debug("No AES key for {} item, using raw bytes", media_type)
-
-            if not data:
-                return None
-
             media_dir = get_media_dir("weixin")
             ext = _ext_for_type(media_type)
             if not filename:
@@ -770,6 +727,25 @@ class WeixinChannel(BaseChannel):
                 filename = f"{media_type}_{ts}_{h}{ext}"
             safe_name = os.path.basename(filename)
             file_path = media_dir / safe_name
+
+            tmp_path = file_path.with_name(f"{file_path.name}.part")
+            data = await self._download_media_bytes(
+                cdn_url,
+                tmp_path=tmp_path,
+                media_type=media_type,
+                display_name=safe_name or filename or "<generated>",
+            )
+            if data is None:
+                return None
+
+            if aes_key_b64:
+                data = _decrypt_aes_ecb(data, aes_key_b64)
+            elif not aes_key_b64:
+                logger.debug("No AES key for {} item, using raw bytes", media_type)
+
+            if not data:
+                return None
+
             file_path.write_bytes(data)
             logger.debug("Downloaded WeChat {} to {}", media_type, file_path)
             return str(file_path)
@@ -777,6 +753,85 @@ class WeixinChannel(BaseChannel):
         except Exception as e:
             logger.error("Error downloading WeChat media: {}", e)
             return None
+
+    async def _download_media_bytes(
+        self,
+        url: str,
+        *,
+        tmp_path: Path,
+        media_type: str,
+        display_name: str,
+    ) -> bytes | None:
+        """Download media to a temporary file, retrying incomplete CDN reads."""
+        assert self._client is not None
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        for attempt in range(1, MEDIA_DOWNLOAD_MAX_ATTEMPTS + 1):
+            received = 0
+            expected: int | None = None
+            try:
+                with contextlib.suppress(FileNotFoundError):
+                    tmp_path.unlink()
+
+                async with self._client.stream("GET", url) as resp:
+                    resp.raise_for_status()
+                    content_length = resp.headers.get("content-length")
+                    if content_length and content_length.isdigit():
+                        expected = int(content_length)
+
+                    with tmp_path.open("wb") as handle:
+                        async for chunk in resp.aiter_bytes():
+                            if not chunk:
+                                continue
+                            handle.write(chunk)
+                            received += len(chunk)
+
+                if expected is not None and received != expected:
+                    raise httpx.RemoteProtocolError(
+                        f"incomplete body received {received} bytes, expected {expected}"
+                    )
+
+                data = tmp_path.read_bytes()
+                tmp_path.unlink(missing_ok=True)
+                return data
+
+            except httpx.HTTPStatusError as e:
+                with contextlib.suppress(FileNotFoundError):
+                    tmp_path.unlink()
+                logger.error(
+                    "WeChat {} download failed with HTTP status {} for {}",
+                    media_type,
+                    e.response.status_code,
+                    display_name,
+                )
+                return None
+            except (httpx.TransportError, OSError) as e:
+                with contextlib.suppress(FileNotFoundError):
+                    tmp_path.unlink()
+                if attempt < MEDIA_DOWNLOAD_MAX_ATTEMPTS:
+                    logger.warning(
+                        "WeChat {} download attempt {}/{} failed for {} "
+                        "(received={} expected={}): {}; retrying in {}s",
+                        media_type,
+                        attempt,
+                        MEDIA_DOWNLOAD_MAX_ATTEMPTS,
+                        display_name,
+                        received,
+                        expected if expected is not None else "unknown",
+                        e,
+                        MEDIA_DOWNLOAD_RETRY_DELAY_S,
+                    )
+                    await asyncio.sleep(MEDIA_DOWNLOAD_RETRY_DELAY_S)
+                    continue
+                logger.error(
+                    "Error downloading WeChat media after {} attempts for {} "
+                    "(received={} expected={}): {}",
+                    MEDIA_DOWNLOAD_MAX_ATTEMPTS,
+                    display_name,
+                    received,
+                    expected if expected is not None else "unknown",
+                    e,
+                )
+                return None
 
     def _resolve_local_file_fallback(self, filename: str | None) -> str | None:
         """Find an exact local filename match in explicitly configured directories."""
