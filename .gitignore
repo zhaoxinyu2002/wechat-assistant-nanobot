@@ -28,3 +28,7 @@ nano.*.save
 .DS_Store
 uv.lock
 knowledge_assistant_*.md
+datasets/
+benchmark_results/**/docs/
+benchmark_results/**/pdfs/
+benchmark_results/**/workspaces/
