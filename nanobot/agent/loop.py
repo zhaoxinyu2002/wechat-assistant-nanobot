@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
@@ -16,22 +15,22 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.memory import MemoryConsolidator
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.knowledge_search import KnowledgeSearchTool
+from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMProvider
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.knowledge.service import KnowledgeService
+from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -136,14 +135,26 @@ class AgentLoop:
             parsed_dir=self.knowledge_config.parsed_dir,
             chunks_dir=self.knowledge_config.chunks_dir,
             index_dir=self.knowledge_config.index_dir,
+            max_file_bytes=self.knowledge_config.max_file_bytes,
+            max_chunks_per_file=self.knowledge_config.max_chunks_per_file,
             max_chunk_chars=self.knowledge_config.max_chunk_chars,
             chunk_overlap=self.knowledge_config.chunk_overlap,
+            chunk_strategy=self.knowledge_config.chunk_strategy,
+            chunk_include_metadata=self.knowledge_config.chunk_include_metadata,
             embedding_provider=self.knowledge_config.embedding_provider,
+            embedding_model=self.knowledge_config.embedding_model,
+            embedding_api_key=self.knowledge_config.embedding_api_key,
+            embedding_base_url=self.knowledge_config.embedding_base_url,
             embedding_dim=self.knowledge_config.embedding_dim,
+            embedding_batch_size=self.knowledge_config.embedding_batch_size,
             vector_index=self.knowledge_config.vector_index,
             retrieval_mode=self.knowledge_config.retrieval_mode,
             keyword_weight=self.knowledge_config.keyword_weight,
             vector_weight=self.knowledge_config.vector_weight,
+            reranker_provider=self.knowledge_config.reranker_provider,
+            reranker_model=self.knowledge_config.reranker_model,
+            reranker_top_k=self.knowledge_config.reranker_top_k,
+            reranker_batch_size=self.knowledge_config.reranker_batch_size,
             parser_pdf=self.knowledge_config.parser_pdf,
             mineru_command=self.knowledge_config.mineru_command,
             mineru_mode=self.knowledge_config.mineru_mode,

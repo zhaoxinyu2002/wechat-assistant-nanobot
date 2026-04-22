@@ -23,6 +23,8 @@ class DocumentParser:
         suffix = file_path.suffix.lower()
 
         if suffix in {".txt", ".md"}:
+            if suffix == ".md":
+                return self._parse_markdown(file_path)
             return self._parse_text(file_path, file_type=suffix.lstrip("."))
         if suffix == ".pdf":
             return self._parse_pdf(file_path)
@@ -59,6 +61,44 @@ class DocumentParser:
             title=path.stem,
             sections=sections,
             parser=parser,
+        )
+
+    @staticmethod
+    def _parse_markdown(path: Path) -> ParsedDocument:
+        raw = path.read_bytes()
+        text = raw.decode("utf-8", errors="ignore").replace("\r\n", "\n").strip()
+        if not text:
+            raise ValueError("document has no readable text content")
+
+        sections: list[ParsedSection] = []
+        current_heading: str | None = None
+        buffer: list[str] = []
+
+        def flush() -> None:
+            nonlocal buffer
+            content = "\n".join(buffer).strip()
+            if content:
+                sections.append(ParsedSection(text=content, heading=current_heading))
+            buffer = []
+
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                flush()
+                current_heading = stripped.lstrip("#").strip() or None
+                continue
+            buffer.append(line)
+        flush()
+
+        if not sections:
+            sections = [ParsedSection(text=text)]
+        title = sections[0].heading if sections and sections[0].heading else path.stem
+        return ParsedDocument(
+            source_file=path.name,
+            file_type="md",
+            title=title,
+            sections=sections,
+            parser="markdown-heading",
         )
 
     @staticmethod

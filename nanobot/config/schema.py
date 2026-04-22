@@ -159,14 +159,26 @@ class KnowledgeConfig(Base):
     parsed_dir: str = "knowledge/parsed"
     chunks_dir: str = "knowledge/chunks"
     index_dir: str = "knowledge/index"
+    max_file_bytes: int = Field(default=30 * 1024 * 1024, ge=1)
+    max_chunks_per_file: int = Field(default=1000, ge=1)
     max_chunk_chars: int = 1200
     chunk_overlap: int = 150
+    chunk_strategy: str = "recursive"  # recursive | section | page
+    chunk_include_metadata: bool = True
     embedding_provider: str = "hashing"
+    embedding_model: str = ""
+    embedding_api_key: str = ""
+    embedding_base_url: str = ""
     embedding_dim: int = Field(default=384, ge=16, le=4096)
+    embedding_batch_size: int = Field(default=64, ge=1, le=512)
     vector_index: str = "faiss"
     retrieval_mode: str = "hybrid"  # hybrid | vector | keyword
     keyword_weight: float = Field(default=0.35, ge=0.0, le=1.0)
     vector_weight: float = Field(default=0.65, ge=0.0, le=1.0)
+    reranker_provider: str = "none"  # none | bge-reranker | sentence-transformers
+    reranker_model: str = ""
+    reranker_top_k: int = Field(default=20, ge=1, le=100)
+    reranker_batch_size: int = Field(default=16, ge=1, le=128)
     parser_pdf: str = "mineru"
     mineru_command: str = ""
     mineru_mode: str = "agent"  # agent | precision | command

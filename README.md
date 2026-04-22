@@ -167,14 +167,25 @@ Add or update the `knowledge` section in `config.json`:
     "parsedDir": "knowledge/parsed",
     "chunksDir": "knowledge/chunks",
     "indexDir": "knowledge/index",
+    "maxFileBytes": 31457280,
+    "maxChunksPerFile": 1000,
     "maxChunkChars": 1200,
     "chunkOverlap": 150,
+    "chunkStrategy": "recursive",
+    "chunkIncludeMetadata": true,
     "embeddingProvider": "hashing",
+    "embeddingModel": "",
+    "embeddingApiKey": "",
+    "embeddingBaseUrl": "",
     "embeddingDim": 384,
+    "embeddingBatchSize": 64,
     "vectorIndex": "faiss",
     "retrievalMode": "hybrid",
     "keywordWeight": 0.35,
     "vectorWeight": 0.65,
+    "rerankerProvider": "none",
+    "rerankerModel": "",
+    "rerankerTopK": 20,
     "parserPdf": "mineru",
     "mineruMode": "precision",
     "mineruBaseUrl": "https://mineru.net",
@@ -194,10 +205,18 @@ Configuration notes:
 - `parsedDir`: Stores parsed JSON results.
 - `chunksDir`: Stores chunked JSONL files.
 - `indexDir`: Stores the SQLite chunk/embedding index and optional FAISS vector index.
-- `embeddingProvider`: Embedding backend. The built-in default is `hashing`, which is local and dependency-free.
+- `maxFileBytes`: Safety cap for automatic ingestion. Larger files are skipped with a clear error instead of running an expensive parse/embedding job in the message loop.
+- `maxChunksPerFile`: Safety cap after parsing/chunking. Split very large documents or raise this intentionally if needed.
+- `chunkStrategy`: Chunking strategy. `recursive` splits long sections with overlap, `section` keeps parsed sections intact, and `page` groups parsed sections by page.
+- `chunkIncludeMetadata`: Prepends headings to chunk text when available, which helps retrieval and citations.
+- `embeddingProvider`: Embedding backend. The built-in default is `hashing`, which is local and dependency-free. Use `openai` for OpenAI-compatible embeddings or `bge-m3` / `sentence-transformers` for local BGE embeddings.
+- `embeddingModel`: Embedding model name, for example `text-embedding-3-small` or `BAAI/bge-m3`.
+- `embeddingApiKey` / `embeddingBaseUrl`: Optional OpenAI-compatible embedding credentials. `OPENAI_API_KEY` is also supported.
 - `vectorIndex`: Vector index backend. `faiss` is used when `faiss-cpu` is installed; otherwise vector search falls back to SQLite-stored embeddings.
 - `retrievalMode`: Default retrieval mode for `knowledge_search`: `hybrid`, `vector`, or `keyword`.
 - `keywordWeight` / `vectorWeight`: Score weights used by hybrid retrieval.
+- `rerankerProvider`: Optional reranker. Use `bge-reranker` or `sentence-transformers` to rerank the top retrieval candidates.
+- `rerankerModel`: Reranker model name, for example `BAAI/bge-reranker-base`.
 - `parserPdf`: PDF parser. The default is `mineru`.
 - `mineruMode`: `precision` uses the MinerU API; `command` uses a local command; `agent` uses the MinerU agent API.
 - `mineruIsOcr`: Enables OCR. Keep this as `true` for better scanned-PDF support.
@@ -207,6 +226,57 @@ Optional FAISS acceleration can be installed with:
 ```bash
 pip install ".[rag]"
 ```
+
+Optional local embedding and reranker models can be installed with:
+
+```bash
+pip install ".[rag-ml]"
+```
+
+Example OpenAI-compatible embedding configuration:
+
+```json
+{
+  "knowledge": {
+    "embeddingProvider": "openai",
+    "embeddingModel": "text-embedding-3-small",
+    "embeddingApiKey": "YOUR_OPENAI_API_KEY",
+    "embeddingDim": 1536
+  }
+}
+```
+
+Example local BGE embedding + reranker configuration:
+
+```json
+{
+  "knowledge": {
+    "embeddingProvider": "bge-m3",
+    "embeddingModel": "BAAI/bge-m3",
+    "embeddingDim": 1024,
+    "rerankerProvider": "bge-reranker",
+    "rerankerModel": "BAAI/bge-reranker-base",
+    "rerankerTopK": 20
+  }
+}
+```
+
+## Evaluate Retrieval
+
+Create a JSONL evaluation file where `relevant` values match expected source names, chunk IDs, headings, or text snippets:
+
+```jsonl
+{"query":"What does the guide say about citations?","relevant":["citations"]}
+{"query":"How is hybrid retrieval configured?","relevant":["hybrid retrieval"]}
+```
+
+Run retrieval evaluation:
+
+```bash
+nanobot knowledge eval eval.jsonl --k 1,3,5
+```
+
+The command reports `Recall@K`, `HitRate@K`, and `MRR`, which can be used to compare chunk sizes, overlap, embedding models, hybrid weights, and reranker settings.
 
 ## Start the Bot
 

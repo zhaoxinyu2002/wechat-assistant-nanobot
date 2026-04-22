@@ -1,12 +1,11 @@
 """CLI commands for nanobot."""
 
 import asyncio
-from contextlib import contextmanager, nullcontext
-
 import os
 import select
 import signal
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -465,6 +464,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
+
     from nanobot.config.loader import get_config_path
 
     path = config_path or get_config_path()
@@ -1094,6 +1094,106 @@ def plugins_list():
             "[green]yes[/green]" if enabled else "[dim]no[/dim]",
         )
 
+    console.print(table)
+
+
+# ============================================================================
+# Knowledge Commands
+# ============================================================================
+
+
+knowledge_app = typer.Typer(help="Manage and evaluate the local knowledge base")
+app.add_typer(knowledge_app, name="knowledge")
+
+
+@knowledge_app.command("eval")
+def knowledge_eval(
+    dataset: str = typer.Argument(..., help="JSON/JSONL retrieval eval dataset"),
+    k: str = typer.Option("1,3,5", "--k", help="Comma-separated K values, e.g. 1,3,5,10"),
+    retrieval_mode: str | None = typer.Option(None, "--mode", help="hybrid, vector, or keyword"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    json_output: bool = typer.Option(False, "--json", help="Print machine-readable JSON"),
+):
+    """Evaluate knowledge retrieval with Recall@K, HitRate@K, and MRR."""
+
+    import json
+
+    from nanobot.knowledge.eval import evaluate_retrieval, load_eval_cases, result_to_dict
+    from nanobot.knowledge.service import KnowledgeService
+
+    loaded = _load_runtime_config(config, workspace)
+    cfg = loaded.knowledge
+    try:
+        k_values = [int(item.strip()) for item in k.split(",") if item.strip()]
+    except ValueError as exc:
+        raise typer.BadParameter("--k must contain comma-separated integers") from exc
+    if not k_values:
+        raise typer.BadParameter("--k must contain at least one integer")
+
+    service = KnowledgeService(
+        workspace=loaded.workspace_path,
+        enabled=cfg.enabled,
+        auto_ingest_from_media=cfg.auto_ingest_from_media,
+        raw_dir=cfg.raw_dir,
+        parsed_dir=cfg.parsed_dir,
+        chunks_dir=cfg.chunks_dir,
+        index_dir=cfg.index_dir,
+        max_file_bytes=cfg.max_file_bytes,
+        max_chunks_per_file=cfg.max_chunks_per_file,
+        max_chunk_chars=cfg.max_chunk_chars,
+        chunk_overlap=cfg.chunk_overlap,
+        chunk_strategy=cfg.chunk_strategy,
+        chunk_include_metadata=cfg.chunk_include_metadata,
+        embedding_provider=cfg.embedding_provider,
+        embedding_model=cfg.embedding_model,
+        embedding_api_key=cfg.embedding_api_key,
+        embedding_base_url=cfg.embedding_base_url,
+        embedding_dim=cfg.embedding_dim,
+        embedding_batch_size=cfg.embedding_batch_size,
+        vector_index=cfg.vector_index,
+        retrieval_mode=cfg.retrieval_mode,
+        keyword_weight=cfg.keyword_weight,
+        vector_weight=cfg.vector_weight,
+        reranker_provider=cfg.reranker_provider,
+        reranker_model=cfg.reranker_model,
+        reranker_top_k=cfg.reranker_top_k,
+        reranker_batch_size=cfg.reranker_batch_size,
+        parser_pdf=cfg.parser_pdf,
+        mineru_command=cfg.mineru_command,
+        mineru_mode=cfg.mineru_mode,
+        mineru_base_url=cfg.mineru_base_url,
+        mineru_api_token=cfg.mineru_api_token,
+        mineru_model_version=cfg.mineru_model_version,
+        mineru_language=cfg.mineru_language,
+        mineru_enable_table=cfg.mineru_enable_table,
+        mineru_enable_formula=cfg.mineru_enable_formula,
+        mineru_is_ocr=cfg.mineru_is_ocr,
+        mineru_page_range=cfg.mineru_page_range,
+        mineru_timeout_s=cfg.mineru_timeout_s,
+        mineru_poll_interval_s=cfg.mineru_poll_interval_s,
+    )
+    cases = load_eval_cases(dataset)
+    result = evaluate_retrieval(
+        service,
+        cases,
+        k_values=k_values,
+        retrieval_mode=retrieval_mode,
+    )
+
+    if json_output:
+        console.print(json.dumps(result_to_dict(result), ensure_ascii=False, indent=2))
+        return
+
+    table = Table(title="Knowledge Retrieval Evaluation")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Cases", str(result.cases))
+    for kk, value in result.recall_at_k.items():
+        table.add_row(f"Recall@{kk}", f"{value:.4f}")
+    for kk, value in result.hit_rate_at_k.items():
+        table.add_row(f"HitRate@{kk}", f"{value:.4f}")
+    table.add_row("MRR", f"{result.mrr:.4f}")
     console.print(table)
 
 

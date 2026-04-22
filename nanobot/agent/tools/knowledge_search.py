@@ -21,8 +21,11 @@ class KnowledgeSearchTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Search the local knowledge base before answering questions about user-uploaded "
-            "documents. Returns source-aware evidence snippets."
+            "Search the local knowledge base for user-uploaded documents. Use this before "
+            "answering questions that mention an uploaded file, document, PDF, notes, report, "
+            "or facts that may live in the user's private knowledge base. Returns ranked, "
+            "source-aware evidence snippets; answer from the evidence and say when evidence "
+            "is insufficient."
         )
 
     @property

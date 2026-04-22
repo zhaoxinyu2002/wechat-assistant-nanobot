@@ -5,8 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from nanobot.knowledge.chunker import KnowledgeChunker
-from nanobot.knowledge.embeddings import HashingEmbedder
+from nanobot.knowledge.embeddings import Embedder, build_embedder
 from nanobot.knowledge.parser import DocumentParser
+from nanobot.knowledge.reranker import Reranker, build_reranker
 from nanobot.knowledge.store import KnowledgeStore
 from nanobot.knowledge.types import IngestResult, KnowledgeChunk, SearchHit
 
@@ -26,14 +27,26 @@ class KnowledgeService:
         parsed_dir: str = "knowledge/parsed",
         chunks_dir: str = "knowledge/chunks",
         index_dir: str = "knowledge/index",
+        max_file_bytes: int = 30 * 1024 * 1024,
+        max_chunks_per_file: int = 1000,
         max_chunk_chars: int = 1200,
         chunk_overlap: int = 150,
+        chunk_strategy: str = "recursive",
+        chunk_include_metadata: bool = True,
         embedding_provider: str = "hashing",
+        embedding_model: str = "",
+        embedding_api_key: str = "",
+        embedding_base_url: str = "",
         embedding_dim: int = 384,
+        embedding_batch_size: int = 64,
         vector_index: str = "faiss",
         retrieval_mode: str = "hybrid",
         keyword_weight: float = 0.35,
         vector_weight: float = 0.65,
+        reranker_provider: str = "none",
+        reranker_model: str = "",
+        reranker_top_k: int = 20,
+        reranker_batch_size: int = 16,
         parser_pdf: str = "mineru",
         mineru_command: str = "",
         mineru_mode: str = "agent",
@@ -51,6 +64,8 @@ class KnowledgeService:
         self.workspace = workspace
         self.enabled = enabled
         self.auto_ingest_from_media = auto_ingest_from_media
+        self.max_file_bytes = max(1, max_file_bytes)
+        self.max_chunks_per_file = max(1, max_chunks_per_file)
         self.store = KnowledgeStore(
             workspace,
             raw_dir=raw_dir,
@@ -64,9 +79,21 @@ class KnowledgeService:
         self.retrieval_mode = retrieval_mode
         self.keyword_weight = keyword_weight
         self.vector_weight = vector_weight
-        self.embedder = self._build_embedder(
+        self.reranker_top_k = max(1, reranker_top_k)
+        self.embedder: Embedder = build_embedder(
             provider=embedding_provider,
             dimension=embedding_dim,
+            model=embedding_model,
+            api_key=embedding_api_key,
+            base_url=embedding_base_url,
+            batch_size=embedding_batch_size,
+        )
+        if self.store.embedding_dim != self.embedder.dimension:
+            self.store.embedding_dim = self.embedder.dimension
+        self.reranker: Reranker = build_reranker(
+            reranker_provider,
+            model=reranker_model,
+            batch_size=reranker_batch_size,
         )
         self.parser = DocumentParser(
             pdf_parser=parser_pdf,
@@ -86,6 +113,8 @@ class KnowledgeService:
         self.chunker = KnowledgeChunker(
             max_chunk_chars=max_chunk_chars,
             chunk_overlap=chunk_overlap,
+            strategy=chunk_strategy,
+            include_metadata=chunk_include_metadata,
         )
 
     def should_ingest(self, path: str | Path) -> bool:
@@ -111,11 +140,23 @@ class KnowledgeService:
         try:
             if not path.exists():
                 raise FileNotFoundError(path)
+            size = path.stat().st_size
+            if size > self.max_file_bytes:
+                raise ValueError(
+                    f"file too large for automatic ingestion: {size} bytes "
+                    f"(limit {self.max_file_bytes} bytes)"
+                )
             self.store.save_raw_file(path)
             parsed = self.parser.parse_file(path)
             chunks = self.chunker.chunk_document(parsed)
             if not chunks:
                 raise ValueError("no chunks generated from parsed document")
+            if len(chunks) > self.max_chunks_per_file:
+                raise ValueError(
+                    f"too many chunks generated: {len(chunks)} "
+                    f"(limit {self.max_chunks_per_file}); increase maxChunksPerFile "
+                    "or split the document"
+                )
             embeddings = self.embed_chunks(chunks)
             self.store.save_parsed_document(parsed)
             self.store.save_chunks(parsed.source_file, chunks, embeddings=embeddings)
@@ -133,7 +174,10 @@ class KnowledgeService:
             )
 
     def embed_chunks(self, chunks: list[KnowledgeChunk]) -> list[list[float]]:
-        return self.embedder.embed_texts([chunk.text for chunk in chunks])
+        embeddings = self.embedder.embed_texts([chunk.text for chunk in chunks])
+        if embeddings:
+            self.store.embedding_dim = len(embeddings[0])
+        return embeddings
 
     def search(
         self,
@@ -147,19 +191,26 @@ class KnowledgeService:
             return []
 
         mode = (retrieval_mode or self.retrieval_mode).lower()
+        candidate_top_k = max(top_k, self.reranker_top_k)
         if mode == "keyword":
-            rows = self.store.keyword_search(query=query, top_k=top_k, source_filter=source_filter)
+            rows = self.store.keyword_search(query=query, top_k=candidate_top_k, source_filter=source_filter)
         elif mode == "vector":
+            query_embedding = self.embedder.embed_text(query)
+            if query_embedding:
+                self.store.embedding_dim = len(query_embedding)
             rows = self.store.vector_search(
-                query_embedding=self.embedder.embed_text(query),
-                top_k=top_k,
+                query_embedding=query_embedding,
+                top_k=candidate_top_k,
                 source_filter=source_filter,
             )
         else:
+            query_embedding = self.embedder.embed_text(query)
+            if query_embedding:
+                self.store.embedding_dim = len(query_embedding)
             rows = self.store.hybrid_search(
                 query=query,
-                query_embedding=self.embedder.embed_text(query),
-                top_k=top_k,
+                query_embedding=query_embedding,
+                top_k=candidate_top_k,
                 source_filter=source_filter,
                 keyword_weight=self.keyword_weight,
                 vector_weight=self.vector_weight,
@@ -181,10 +232,4 @@ class KnowledgeService:
                 ),
                 score=score,
             ))
-        return hits
-
-    @staticmethod
-    def _build_embedder(provider: str, dimension: int) -> HashingEmbedder:
-        if provider.lower() != "hashing":
-            raise ValueError(f"unsupported embedding provider: {provider}")
-        return HashingEmbedder(dimension=dimension)
+        return self.reranker.rerank(query, hits, top_k)

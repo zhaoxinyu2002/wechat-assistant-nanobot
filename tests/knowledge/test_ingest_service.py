@@ -66,3 +66,43 @@ def test_ingest_service_saves_raw_file_and_parses_docx(tmp_path) -> None:
     hits = service.search("citations", top_k=1)
     assert hits
     assert "citations" in hits[0].chunk.text
+
+
+def test_markdown_heading_chunk_strategy_preserves_heading_metadata(tmp_path) -> None:
+    source = tmp_path / "guide.md"
+    source.write_text(
+        "# Setup\n\nInstall dependencies first.\n\n# Usage\n\nRun the bot from the gateway.",
+        encoding="utf-8",
+    )
+
+    service = KnowledgeService(tmp_path, chunk_strategy="section")
+    results = service.ingest_files([str(source)])
+
+    assert results[0].status == "ok"
+    hits = service.search("gateway", top_k=1)
+
+    assert hits
+    assert hits[0].chunk.heading == "Usage"
+    assert "Usage" in hits[0].chunk.text
+
+
+def test_ingest_service_rejects_files_over_safety_limit(tmp_path) -> None:
+    source = tmp_path / "large.txt"
+    source.write_text("large document content", encoding="utf-8")
+
+    service = KnowledgeService(tmp_path, max_file_bytes=5)
+    results = service.ingest_files([str(source)])
+
+    assert results[0].status == "error"
+    assert "file too large" in str(results[0].error)
+
+
+def test_ingest_service_rejects_excessive_chunk_count(tmp_path) -> None:
+    source = tmp_path / "many.txt"
+    source.write_text("A\n\nB\n\nC", encoding="utf-8")
+
+    service = KnowledgeService(tmp_path, max_chunks_per_file=2)
+    results = service.ingest_files([str(source)])
+
+    assert results[0].status == "error"
+    assert "too many chunks" in str(results[0].error)
