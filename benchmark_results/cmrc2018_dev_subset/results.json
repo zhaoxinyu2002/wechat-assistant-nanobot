@@ -16,10 +16,10 @@
       "embedding_provider": "hashing",
       "reranker_provider": "none",
       "ingested_docs": 150,
-      "init_seconds": 0.012,
-      "ingest_seconds": 2.05,
-      "eval_seconds": 0.617,
-      "avg_query_ms": 2.056,
+      "init_seconds": 0.016,
+      "ingest_seconds": 2.033,
+      "eval_seconds": 0.662,
+      "avg_query_ms": 2.206,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -44,9 +44,9 @@
       "reranker_provider": "none",
       "ingested_docs": 150,
       "init_seconds": 0.021,
-      "ingest_seconds": 2.257,
-      "eval_seconds": 24.661,
-      "avg_query_ms": 82.205,
+      "ingest_seconds": 2.166,
+      "eval_seconds": 22.416,
+      "avg_query_ms": 74.719,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -70,10 +70,10 @@
       "embedding_provider": "bge-m3",
       "reranker_provider": "none",
       "ingested_docs": 150,
-      "init_seconds": 42.887,
-      "ingest_seconds": 11.843,
-      "eval_seconds": 13.837,
-      "avg_query_ms": 46.122,
+      "init_seconds": 49.224,
+      "ingest_seconds": 11.135,
+      "eval_seconds": 13.212,
+      "avg_query_ms": 44.041,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -97,10 +97,10 @@
       "embedding_provider": "bge-m3",
       "reranker_provider": "none",
       "ingested_docs": 150,
-      "init_seconds": 27.518,
-      "ingest_seconds": 12.028,
-      "eval_seconds": 42.418,
-      "avg_query_ms": 141.392,
+      "init_seconds": 26.263,
+      "ingest_seconds": 11.76,
+      "eval_seconds": 32.703,
+      "avg_query_ms": 109.011,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -124,10 +124,10 @@
       "embedding_provider": "bge-m3",
       "reranker_provider": "bge-reranker",
       "ingested_docs": 150,
-      "init_seconds": 50.897,
-      "ingest_seconds": 12.441,
-      "eval_seconds": 136.97,
-      "avg_query_ms": 456.566,
+      "init_seconds": 46.198,
+      "ingest_seconds": 11.819,
+      "eval_seconds": 132.205,
+      "avg_query_ms": 440.685,
       "metrics": {
         "cases": 300,
         "recall_at_k": {

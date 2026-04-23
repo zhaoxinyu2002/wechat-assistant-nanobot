@@ -17,9 +17,9 @@
       "reranker_provider": "none",
       "ingested_docs": 150,
       "init_seconds": 0.016,
-      "ingest_seconds": 5.354,
-      "eval_seconds": 27.296,
-      "avg_query_ms": 90.987,
+      "ingest_seconds": 4.848,
+      "eval_seconds": 23.445,
+      "avg_query_ms": 78.15,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -43,10 +43,10 @@
       "embedding_provider": "bge-m3",
       "reranker_provider": "none",
       "ingested_docs": 150,
-      "init_seconds": 115.196,
-      "ingest_seconds": 45.406,
-      "eval_seconds": 16.807,
-      "avg_query_ms": 56.023,
+      "init_seconds": 36.368,
+      "ingest_seconds": 40.071,
+      "eval_seconds": 14.624,
+      "avg_query_ms": 48.747,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -70,10 +70,10 @@
       "embedding_provider": "bge-m3",
       "reranker_provider": "none",
       "ingested_docs": 150,
-      "init_seconds": 58.002,
-      "ingest_seconds": 41.014,
-      "eval_seconds": 38.931,
-      "avg_query_ms": 129.769,
+      "init_seconds": 22.72,
+      "ingest_seconds": 39.615,
+      "eval_seconds": 35.698,
+      "avg_query_ms": 118.994,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -97,10 +97,10 @@
       "embedding_provider": "bge-m3",
       "reranker_provider": "bge-reranker",
       "ingested_docs": 150,
-      "init_seconds": 53.313,
-      "ingest_seconds": 43.897,
-      "eval_seconds": 149.818,
-      "avg_query_ms": 499.393,
+      "init_seconds": 42.722,
+      "ingest_seconds": 39.76,
+      "eval_seconds": 135.459,
+      "avg_query_ms": 451.531,
       "metrics": {
         "cases": 300,
         "recall_at_k": {
@@ -116,33 +116,6 @@
           "10": 0.5766666666666667
         },
         "mrr": 0.46006613756613757
-      }
-    },
-    {
-      "name": "ours_bge_vector_rerank",
-      "retrieval_mode": "vector",
-      "embedding_provider": "bge-m3",
-      "reranker_provider": "bge-reranker",
-      "ingested_docs": 150,
-      "init_seconds": 310.014,
-      "ingest_seconds": 54.568,
-      "eval_seconds": 103.963,
-      "avg_query_ms": 346.542,
-      "metrics": {
-        "cases": 300,
-        "recall_at_k": {
-          "1": 0.41333333333333333,
-          "3": 0.5033333333333333,
-          "5": 0.5466666666666666,
-          "10": 0.6233333333333333
-        },
-        "hit_rate_at_k": {
-          "1": 0.41333333333333333,
-          "3": 0.5033333333333333,
-          "5": 0.5466666666666666,
-          "10": 0.6233333333333333
-        },
-        "mrr": 0.47261243386243373
       }
     }
   ]
