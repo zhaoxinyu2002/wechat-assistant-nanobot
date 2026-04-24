@@ -23,59 +23,6 @@ This project extends [HKUDS/nanobot](https://github.com/HKUDS/nanobot). Upstream
 
 Compared with the hashing hybrid baseline, BGE-M3 plus reranking improves CMRC2018 Recall@1 from 41.00% to 97.67% and MRR from 0.5300 to 0.9850. On UDA paper evidence retrieval, the best reproduced setting improves Recall@1 from 4.00% to 41.33% and MRR from 0.0745 to 0.4601. See [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) for the full tables.
 
-## Architecture
-
-```mermaid
-flowchart TB
-    subgraph M["1. WeChat message layer"]
-        U["User in WeChat<br/>uploads files or asks questions"]
-        WX["WeixinChannel<br/>QR login, long polling, media download"]
-        BUS["MessageBus / InboundMessage<br/>content, media, ingest_candidates"]
-        U --> WX --> BUS
-    end
-
-    subgraph ING["2. Automatic document ingestion before the LLM turn"]
-        LOOP["AgentLoop._maybe_ingest_knowledge_files"]
-        SVC["KnowledgeService.ingest_files"]
-        PARSE["DocumentParser<br/>MinerU PDF/OCR, DOCX, TXT, MD"]
-        CHUNK["KnowledgeChunker<br/>recursive / section / page<br/>overlap + heading metadata"]
-        EMB["Embedder<br/>hashing / OpenAI-compatible / BGE-M3"]
-        STORE["KnowledgeStore<br/>raw files, parsed JSON, chunk JSONL"]
-        DB[("SQLite knowledge.db<br/>chunks + embeddings")]
-        FAISS[("Optional FAISS index<br/>vector search acceleration")]
-
-        BUS --> LOOP --> SVC --> PARSE --> CHUNK --> EMB --> STORE
-        STORE --> DB
-        STORE --> FAISS
-    end
-
-    subgraph AG["3. Agentic retrieval and answer generation"]
-        CTX["ContextBuilder<br/>history + memory + ingestion note"]
-        LLM["LLM Agent Loop<br/>provider abstraction + tool calling"]
-        TOOL["knowledge_search tool<br/>query, top_k, retrieval_mode, source_filter"]
-        SEARCH["Search pipeline<br/>keyword / vector / hybrid"]
-        RERANK["Optional BGE reranker<br/>rerank candidate evidence"]
-        EVID["Source-aware evidence<br/>source, page, heading, score"]
-        ANS["Evidence-grounded answer<br/>returned to WeChat"]
-
-        BUS --> CTX --> LLM
-        LLM -->|"decides when and how to search"| TOOL
-        TOOL --> SEARCH
-        SEARCH --> DB
-        SEARCH --> FAISS
-        SEARCH --> RERANK --> EVID --> LLM --> ANS --> WX
-    end
-
-    subgraph EV["4. Offline retrieval evaluation"]
-        EVAL["eval/run_cmrc_eval.py<br/>eval/run_uda_evidence_eval.py"]
-        METRIC["Recall@K, MRR,<br/>Avg query latency"]
-        EVAL --> SVC
-        EVAL --> METRIC
-    end
-```
-
-The retrieval path is tool-driven: uploaded files are ingested automatically, but document search is exposed as `knowledge_search`, so the agent can decide whether to retrieve, which retrieval mode to use, and how to ground the final answer in source-aware evidence.
-
 ## Project Structure
 
 ```text
