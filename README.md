@@ -1,31 +1,49 @@
 # WeChat Assistant Nanobot
 
-A WeChat-based private knowledge base RAG assistant. Users can send PDF, Word, Markdown, TXT, and other documents in WeChat. The bot stores the files in a local workspace, parses them, splits them into chunks, persists SQLite chunk metadata and embeddings, and can build a local FAISS vector index. After that, users can ask questions about the uploaded documents directly in WeChat.
+A WeChat-based private knowledge-base Agentic RAG assistant. Users can upload PDF, Word, Markdown, and TXT documents in WeChat; the bot ingests them into a local knowledge base and exposes retrieval as a `knowledge_search` tool that the agent can call before answering document-grounded questions.
 
-This project is based on [HKUDS/nanobot](https://github.com/HKUDS/nanobot). nanobot provides the agent loop, model provider abstraction, tool-calling runtime, and WeChat channel. This project adds automatic WeChat file ingestion, a local knowledge base, and a `knowledge_search` retrieval tool.
+This project extends [HKUDS/nanobot](https://github.com/HKUDS/nanobot). Upstream nanobot provides the agent loop, model provider abstraction, tool-calling runtime, and chat-channel framework. This project adds automatic WeChat file ingestion, a local RAG knowledge pipeline, source-aware retrieval results, and reproducible retrieval benchmarks.
 
-## Features
+## Highlights
 
-- Automatically downloads WeChat file messages and sends them through the knowledge ingestion pipeline.
-- Supports `pdf`, `docx`, `txt`, and `md`.
-- Uses MinerU first for PDF parsing, with OCR enabled by default.
-- Stores ingested data in the local workspace, without requiring a cloud vector database.
-- Uses SQLite as a lightweight retrieval index, making deployment and debugging simple.
-- Lets the agent call `knowledge_search` before answering questions about uploaded documents.
-- Keeps nanobot's original provider configuration style, so it can work with DeepSeek, OpenAI, DashScope, and other OpenAI-compatible APIs.
+- Tool-driven Agentic RAG: document retrieval is registered as an agent tool instead of being a fixed pre-answer step.
+- Automatic WeChat file ingestion for `pdf`, `docx`, `txt`, and `md` uploads.
+- MinerU-based PDF parsing with OCR support for scanned or structured PDFs.
+- Local-first knowledge storage with raw files, parsed JSON, chunk JSONL, SQLite metadata, and optional FAISS vector index.
+- Multiple retrieval backends: hashing fallback, OpenAI-compatible embeddings, local BGE-M3 embeddings, hybrid retrieval, and optional BGE reranking.
+- Source-aware evidence snippets returned with `source`, `page`, `heading`, and `score`.
+- Reproducible retrieval evaluation on CMRC2018 Chinese QA and UDA-Benchmark paper evidence retrieval.
 
-## Workflow
+## Benchmark Highlights
 
-```text
-User sends a file in WeChat
-  -> WeChat channel downloads the file
-  -> AgentLoop detects ingestible files
-  -> KnowledgeService parses the document
-  -> KnowledgeChunker splits text into chunks
-  -> KnowledgeStore saves raw files, parsed results, chunks, and SQLite index
-  -> User asks a question
-  -> Agent calls knowledge_search
-  -> Model answers based on retrieved snippets
+| Dataset | Scale | Best setting | Recall@1 | MRR |
+|---|---:|---|---:|---:|
+| CMRC2018 dev subset | 150 documents / 300 queries | BGE-M3 + reranker | 0.9767 | 0.9850 |
+| UDA paper evidence subset | 150 documents / 300 queries | BGE-M3 hybrid + reranker | 0.4133 | 0.4601 |
+
+Compared with the hashing hybrid baseline, BGE-M3 plus reranking improves CMRC2018 Recall@1 from 41.00% to 97.67% and MRR from 0.5300 to 0.9850. On UDA paper evidence retrieval, the best reproduced setting improves Recall@1 from 4.00% to 41.33% and MRR from 0.0745 to 0.4601. See [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md) for the full tables.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U[WeChat User] --> W[WeChat Channel]
+    W --> L[Agent Loop]
+
+    L --> D{Ingestible file?}
+    D -- yes --> P[Parser: PDF / DOCX / MD / TXT]
+    P --> C[Chunking]
+    C --> E[Embedding: Hashing / BGE-M3]
+    E --> I[SQLite Metadata + FAISS Vector Index]
+
+    D -- no --> A[LLM Agent]
+    L --> A
+    A --> T[knowledge_search Tool]
+    T --> I
+    I --> R[Source-aware Evidence]
+    R --> A
+    A --> O[Evidence-grounded Answer]
+    O --> W
 ```
 
 ## Project Structure
@@ -36,17 +54,26 @@ nanobot/knowledge/
   parser.py         Document parsing entry point
   mineru_parser.py  MinerU PDF parser wrapper
   chunker.py        Text chunking
+  embeddings.py     Hashing, OpenAI-compatible, and BGE-M3 embedding backends
+  reranker.py       Optional cross-encoder reranker
   store.py          Local files and SQLite index
   service.py        Ingestion and retrieval orchestration
+  eval.py           Retrieval evaluation utilities
 
 nanobot/agent/tools/knowledge_search.py
-  Local knowledge search tool used by the agent
+  Source-aware local knowledge search tool used by the agent
 
 nanobot/channels/weixin.py
   Downloads WeChat files and marks them as ingestible
 
 nanobot/agent/loop.py
   Runs automatic file ingestion before handling user messages
+
+eval/
+  Reproducible benchmark scripts for CMRC2018 and UDA evidence retrieval
+
+benchmark_results/
+  Saved benchmark tables and JSON result files
 ```
 
 ## Requirements
@@ -273,10 +300,21 @@ Create a JSONL evaluation file where `relevant` values match expected source nam
 Run retrieval evaluation:
 
 ```bash
+conda activate nanobot
 nanobot knowledge eval eval.jsonl --k 1,3,5
 ```
 
 The command reports `Recall@K`, `HitRate@K`, and `MRR`, which can be used to compare chunk sizes, overlap, embedding models, hybrid weights, and reranker settings.
+
+The repository also includes reproducible benchmark scripts:
+
+```bash
+conda activate nanobot
+python eval/run_cmrc_eval.py
+python eval/run_uda_evidence_eval.py
+```
+
+Saved benchmark summaries are available in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
 
 ## Start the Bot
 
@@ -335,12 +373,14 @@ This repository keeps the tests related to the knowledge-base extension:
 tests/knowledge/test_ingest_service.py
 tests/tools/test_knowledge_search_tool.py
 tests/agent/test_loop_knowledge_ingest.py
+tests/channels/test_weixin_config.py
 ```
 
 Run:
 
 ```bash
-pytest tests/knowledge tests/tools/test_knowledge_search_tool.py tests/agent/test_loop_knowledge_ingest.py
+conda activate nanobot
+pytest tests/knowledge tests/tools/test_knowledge_search_tool.py tests/agent/test_loop_knowledge_ingest.py tests/channels/test_weixin_config.py
 ```
 
 ## Open Source Notice
