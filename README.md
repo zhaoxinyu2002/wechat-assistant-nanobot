@@ -26,25 +26,55 @@ Compared with the hashing hybrid baseline, BGE-M3 plus reranking improves CMRC20
 ## Architecture
 
 ```mermaid
-flowchart LR
-    U[WeChat User] --> W[WeChat Channel]
-    W --> L[Agent Loop]
+flowchart TB
+    subgraph M["1. WeChat message layer"]
+        U["User in WeChat<br/>uploads files or asks questions"]
+        WX["WeixinChannel<br/>QR login, long polling, media download"]
+        BUS["MessageBus / InboundMessage<br/>content, media, ingest_candidates"]
+        U --> WX --> BUS
+    end
 
-    L --> D{Ingestible file?}
-    D -- yes --> P[Parser: PDF / DOCX / MD / TXT]
-    P --> C[Chunking]
-    C --> E[Embedding: Hashing / BGE-M3]
-    E --> I[SQLite Metadata + FAISS Vector Index]
+    subgraph ING["2. Automatic document ingestion before the LLM turn"]
+        LOOP["AgentLoop._maybe_ingest_knowledge_files"]
+        SVC["KnowledgeService.ingest_files"]
+        PARSE["DocumentParser<br/>MinerU PDF/OCR, DOCX, TXT, MD"]
+        CHUNK["KnowledgeChunker<br/>recursive / section / page<br/>overlap + heading metadata"]
+        EMB["Embedder<br/>hashing / OpenAI-compatible / BGE-M3"]
+        STORE["KnowledgeStore<br/>raw files, parsed JSON, chunk JSONL"]
+        DB[("SQLite knowledge.db<br/>chunks + embeddings")]
+        FAISS[("Optional FAISS index<br/>vector search acceleration")]
 
-    D -- no --> A[LLM Agent]
-    L --> A
-    A --> T[knowledge_search Tool]
-    T --> I
-    I --> R[Source-aware Evidence]
-    R --> A
-    A --> O[Evidence-grounded Answer]
-    O --> W
+        BUS --> LOOP --> SVC --> PARSE --> CHUNK --> EMB --> STORE
+        STORE --> DB
+        STORE --> FAISS
+    end
+
+    subgraph AG["3. Agentic retrieval and answer generation"]
+        CTX["ContextBuilder<br/>history + memory + ingestion note"]
+        LLM["LLM Agent Loop<br/>provider abstraction + tool calling"]
+        TOOL["knowledge_search tool<br/>query, top_k, retrieval_mode, source_filter"]
+        SEARCH["Search pipeline<br/>keyword / vector / hybrid"]
+        RERANK["Optional BGE reranker<br/>rerank candidate evidence"]
+        EVID["Source-aware evidence<br/>source, page, heading, score"]
+        ANS["Evidence-grounded answer<br/>returned to WeChat"]
+
+        BUS --> CTX --> LLM
+        LLM -->|"decides when and how to search"| TOOL
+        TOOL --> SEARCH
+        SEARCH --> DB
+        SEARCH --> FAISS
+        SEARCH --> RERANK --> EVID --> LLM --> ANS --> WX
+    end
+
+    subgraph EV["4. Offline retrieval evaluation"]
+        EVAL["eval/run_cmrc_eval.py<br/>eval/run_uda_evidence_eval.py"]
+        METRIC["Recall@K, MRR,<br/>Avg query latency"]
+        EVAL --> SVC
+        EVAL --> METRIC
+    end
 ```
+
+The retrieval path is tool-driven: uploaded files are ingested automatically, but document search is exposed as `knowledge_search`, so the agent can decide whether to retrieve, which retrieval mode to use, and how to ground the final answer in source-aware evidence.
 
 ## Project Structure
 
